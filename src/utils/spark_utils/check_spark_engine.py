@@ -1,4 +1,4 @@
-from spark_session import get_spark_session
+from src.utils.spark_utils.spark_session import get_spark_session
 
 # Initialize the engine
 spark = get_spark_session("engine_check")
