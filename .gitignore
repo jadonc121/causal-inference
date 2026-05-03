@@ -217,11 +217,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Data
-data/
-*.csv
-*.parquet
-
 # Venv
 .venv/
 __pycache__/
