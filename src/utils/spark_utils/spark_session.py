@@ -2,9 +2,14 @@ from pyspark.sql import SparkSession
 
 def get_spark_session(app_name: str = "causal_inference_project") -> SparkSession:
     """
-    Initializes and returns a local SparkSession.
+    Initializes and returns a local SparkSession. 
 
-    Note: Sets the driver memory and shuffle partition to be optimized for my local machine.
+    For optimization on a small local machine, this sets:
+        - small driver memory
+        - small level for shuffle partitions
+        - log level of "ERROR"
+
+    Note: Log level of ERROR will ignore numerical errors! Convert back to WARN to view these.
     """
     spark = (
         SparkSession.builder
