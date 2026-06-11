@@ -47,8 +47,6 @@ def get_spark_session(app_name: str = "causal_inference_project") -> SparkSessio
         .appName(app_name)
         .config("spark.driver.memory", "4g")  # Allocates 4GB of RAM to the local driver
         .config("spark.sql.shuffle.partitions", "4")  # Optimizes shuffles for a local machine
-        # .config("spark.sql.repl.eagerEval.enabled", True)
-        # .config("spark.sql.repl.eagerEval.maxNumRows", 100)
         .getOrCreate()
     )
     

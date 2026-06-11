@@ -222,3 +222,17 @@ __marimo__/
 __pycache__/
 spark-warehouse/
 metastore_db/
+
+# Data
+data/raw
+data/processed
+*.csv
+*.txt
+*.xlsx
+*.xls
+
+# Dev work
+notebooks/dev
+
+# Claude Code
+CLAUDE.md
