@@ -1,7 +1,7 @@
 ## Time Series Constants
 
 # Full State Names
-US_STATES_LIST = [
+US_STATE_NAMES = [
     "Alabama", "Alaska", "Arizona", "Arkansas", "California",
     "Colorado", "Connecticut", "Delaware", "Florida", "Georgia",
     "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa",
@@ -15,10 +15,16 @@ US_STATES_LIST = [
 ]
 
 # State Abbreviations
-US_STATE_ABBREV_LIST = [
+US_STATE_ABBREVS = [
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
     "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
     "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
     "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
     "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
+]
+
+# Calendar month names
+MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June", 
+    "July", "August", "September", "October", "November", "December"
 ]

@@ -224,8 +224,10 @@ spark-warehouse/
 metastore_db/
 
 # Data
-data/raw
-data/processed
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
 *.csv
 *.txt
 *.xlsx
@@ -236,3 +238,4 @@ notebooks/dev
 
 # Claude Code
 CLAUDE.md
+NEXT_STEPS.md

@@ -2,7 +2,8 @@ import pandas as pd
 import time
 
 from fredapi import Fred
-from src.config.constants import US_STATE_ABBREV_LIST
+from src.config.constants import US_STATE_ABBREVS
+from src.ingestion.common import write_dataframe_to_csv
 
 ## Constants
 
@@ -29,7 +30,7 @@ BASE_COLUMNS = ["state", "year", "month"]
 
 ## Functions
 
-def get_fred_data(
+def _get_fred_data(
     fred_client: Fred,
     states_list: list[str],
     suffix_list: list[str],
@@ -103,46 +104,26 @@ def get_fred_data(
 
     return pd.concat(all_fred_data, ignore_index=False)
 
-def write_fred_data(df: pd.DataFrame, file_path: str) -> None:
-    """Write the assembled FRED panel to a CSV file.
-
-    This will overwrite any file currently stored at the given file_path.
-
-    Args:
-        df: The FRED panel to persist.
-        file_path: Destination path for the CSV.
-
-    Raises:
-        OSError: If the file cannot be written; annotated with the target path
-            and re-raised.
-    """
-
-    try:
-        df.to_csv(file_path, index=False)
-    except OSError as e:
-        e.add_note(f"Failed to write file to CSV with file path: {file_path}")
-        raise 
-
-def run_fred_ingestion_pipeline(fred_client: Fred, output_path: str) -> None:
+def run_fred_ingestion_pipeline(fred_client: Fred, file_path: str) -> None:
     """Run the full FRED ingestion: fetch every state's series and write the panel.
 
     Composes get_fred_data and write_fred_data using the module-level series
-    and column configuration, producing a single CSV at the output path.
+    and column configuration, producing a single CSV at the output file path.
 
     Args:
         fred_client: Authenticated FRED client used to fetch series.
-        output_path: Destination path for the written CSV panel.
+        file_path: Destination path for the written CSV panel.
     """
 
-    fred_data_df = get_fred_data(
+    fred_data_df = _get_fred_data(
         fred_client=fred_client,
-        states_list=US_STATE_ABBREV_LIST,
+        states_list=US_STATE_ABBREVS,
         suffix_list=SERIES_SUFFIXES,
         prefix_list=SERIES_PREFIXES,
         base_columns=BASE_COLUMNS,
         rate_limit=RATE_LIMIT_PAUSE_AMOUNT
     )
 
-    write_fred_data(df=fred_data_df, file_path=output_path)
+    write_dataframe_to_csv(df=fred_data_df, file_path=file_path)
 
 
