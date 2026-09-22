@@ -1,16 +1,18 @@
 import pandas as pd
 import time
 import concurrent.futures
-import functools
+
 
 from fredapi import Fred
 from tqdm.auto import tqdm
+from functools import reduce, partial
 from src.config.constants import US_STATE_ABBREVS
 from src.ingestion.common import write_dataframe_to_csv
 
 ## Constants
 
-RATE_LIMIT_PAUSE_AMOUNT = 0.5 # in seconds
+RATE_LIMIT_PAUSE_AMOUNT = 2 # in seconds
+N_MAX_WORKERS = 5 # for multithreading client requests
 
 # Column definitions
 FRED_DATA_COLUMN_DEFINITIONS = {
@@ -144,7 +146,6 @@ def _build_series_id(
 ) -> str:
     """
     TODO: Add docstring
-    TODO: REDO using new format: pull this info from df col names
     """
     state_assert_msg = f"state must be an uppercase state abbreviation. Received: {state}"
     assert state in US_STATE_ABBREVS, state_assert_msg
@@ -171,23 +172,23 @@ def _apply_series_id(
     )
     
 def _create_empty_series_df(
-    series_by_name_dict: dict,
-    state_abbrevs_list: list
+    series_by_name: dict,
+    state_abbrevs: list
 ) -> pd.DataFrame:
     """
     TODO: Add docstring
     """
 
-    series_names = series_by_name_dict.keys()
+    series_names = series_by_name.keys()
     series_names_df = pd.DataFrame(series_names, columns=["series_name"])
-    states_df = pd.DataFrame(state_abbrevs_list, columns=["state"])
+    states_df = pd.DataFrame(state_abbrevs, columns=["state"])
 
     return states_df.join(series_names_df, how="cross")
 
 def _make_fred_client_request(
     series_id: str,
     fred_client: Fred
-) -> pd.Series:
+) -> pd.Series | None:
     """
     TODO: Add docstring
     TODO: Add smarter, specific exception catching
@@ -215,7 +216,6 @@ def _format_series_data(
     series.name = series_name
     series_df = series.to_frame().reset_index()
 
-
     series_df = series_df.rename(columns={"index": "date"})
     series_df["date"] = pd.to_datetime(series_df["date"])
     series_df["month"] = series_df["date"].dt.month
@@ -226,11 +226,11 @@ def _format_series_data(
 
 def _get_fred_series(
     row: pd.Series,
-    fred_client: Fred
+    fred_client: Fred,
+    rate_limit: float
 ) -> pd.DataFrame:
     """
     TODO: Add docstring
-    TODO: Condense return object to be the result of the _format func
     """
     
     row_state = row["state"]
@@ -241,36 +241,40 @@ def _get_fred_series(
         series_id=row_series_id,
         fred_client=fred_client
     )
+    
+    time.sleep(rate_limit)
 
-    formatted_series_data = _format_series_data(
+    return _format_series_data(
         series=series_data,
         series_name=row_series_name,
         state=row_state
     )
 
-    return formatted_series_data
-
 def _run_parallel_series_requests(
-        states_list: list[str],
-        progress_bar: bool = False
+    series_df: pd.DataFrame,
+    fred_client: Fred,
+    n_max_workers: int,
+    rate_limit: float,
+    progress_bar: bool = False
 ):
     """
     TODO: Add docstring
-    TODO: Determine how to wrap the executor mapping: wrap in list() or other?
     """
 
-    state_dfs = []
+    series_rows = [row for _, row in series_df.iterrows()]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_max_workers) as executor:
+        executor_mapping = executor.map(partial(_get_fred_series, fred_client=fred_client, rate_limit=rate_limit), series_rows)
+
         if progress_bar:
             progress_bar_desc = "Requesting FRED URLs in parallel"
-            # results = list(tqdm(executor.map(_check_url_exists, urls), total=len(urls), desc=progress_bar_desc))
-            state_dfs.append(tqdm(executor.map(_get_fred_series, states_list), total=len(states_list), desc=progress_bar_desc))
+            series_data_dfs = list(tqdm(executor_mapping, total=len(series_rows), desc=progress_bar_desc))
         else:
-            # results = list(executor.map(_check_url_exists, urls))
-            state_dfs.append(executor.map(_get_fred_series, states_list))
+            series_data_dfs = list(executor_mapping)
 
-    # return list of state dfs OR merged dfs
+    series_df["series_data"] = series_data_dfs
+
+    return series_df
 
 def _merge_two_dfs(
         df1: pd.DataFrame,
@@ -295,37 +299,45 @@ def _rollup_series_df(
         series_dfs = sub_df["series_data"].tolist()
 
         cols = base_columns + list(series_by_name.keys())
-        state_df = functools.reduce(_merge_two_dfs, series_dfs)[cols]
+        state_df = reduce(_merge_two_dfs, series_dfs)[cols]
         state_dfs.append(state_df)
 
     return pd.concat(state_dfs, ignore_index=True)
 
-def run_fred_ingestion_pipeline(
+def run_fred_ingestion_pipeline2(
     series_by_name: dict,
     states_abbrevs: list[str],
-    fred_client: Fred,
     base_columns: list[str],
+    fred_client: Fred,
+    file_path: str,
+    rate_limit: float = RATE_LIMIT_PAUSE_AMOUNT,
+    n_max_workers: int = N_MAX_WORKERS,
+    progress_bar: bool = False
 ) -> None:
     """
     TODO: Add docstring
-    TODO: Add write functionality
-    TODO: Update with parallelization logic
     """
 
     # Create empty dataframe to fill
-    series_df = _create_empty_series_df(series_by_name=series_by_name, state_abbrevs_list=states_abbrevs)
+    empty_df = _create_empty_series_df(series_by_name=series_by_name, state_abbrevs=states_abbrevs)
 
     # Create series IDs
-    series_df["series_id"] = series_df.apply(_apply_series_id, axis=1, args=(series_by_name,))
+    empty_df["series_id"] = empty_df.apply(_apply_series_id, axis=1, args=(series_by_name,))
 
-    # Get series data - parallelize here!
-    series_df["series_data"] = series_df.apply(_get_fred_series, axis=1, args=(fred_client,))
+    # Get series data
+    series_df = _run_parallel_series_requests(
+        series_df=empty_df, 
+        fred_client=fred_client,
+        n_max_workers=n_max_workers,
+        rate_limit=rate_limit,
+        progress_bar=progress_bar
+    )
 
     # Rollup data into single frame
     final_df = _rollup_series_df(series_df, base_columns=base_columns, series_by_name=series_by_name)
 
     # Write data to file
-    final_df.count() # replace with write func
+    write_dataframe_to_csv(df=final_df, file_path=file_path)
 
 
 
