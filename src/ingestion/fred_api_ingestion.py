@@ -39,113 +39,51 @@ SERIES_NAMES_BY_TYPE = dict(
 
 BASE_COLUMNS = ["state", "year", "month"]
 
-## Functions - DEPRECATE
+## Functions
 
-def _get_fred_data(
-    fred_client: Fred,
-    states_list: list[str],
-    suffix_list: list[str],
-    prefix_list: list[str],
-    base_columns: list[str],
-    rate_limit: float
+def _create_empty_series_df(
+    series_by_name: dict,
+    state_abbrevs: list
 ) -> pd.DataFrame:
-    """Fetch FRED series for every state and assemble a (state, year, month) panel.
-
-    For each state, pulls the suffix-keyed series (series ID built as
-    state + suffix) and prefix-keyed series (series ID built as prefix +
-    state), reshapes each to monthly rows, and outer-merges them onto a
-    shared base grain so missing observations across sources are preserved.
-    Sleeps between API calls to stay within the FRED rate limit.
+    """Build the cross product of series names and state abbreviations.
 
     Args:
-        fred_client: Authenticated FRED client used to fetch series.
-        states_list: State abbreviations to iterate over, forming the panel rows.
-        suffix_list: Series codes appended to each state abbreviation (e.g. URN).
-        prefix_list: Series codes prepended to each state abbreviation (e.g. EXPTOT).
-        base_columns: Join keys defining the panel grain (state, year, month).
-        rate_limit: Seconds to pause after each series fetch.
+        series_by_name: Mapping of series name to series type; only its keys
+            are used here.
+        state_abbrevs: State abbreviations to cross with each series name.
 
     Returns:
-        A DataFrame of all states stacked, with the base columns plus one
-        feature column per series code.
+        A DataFrame with one row per (state, series_name) pair, containing
+        "state" and "series_name" columns.
     """
 
-    all_fred_data = []
+    series_names = series_by_name.keys()
+    series_names_df = pd.DataFrame(series_names, columns=["series_name"])
+    states_df = pd.DataFrame(state_abbrevs, columns=["state"])
 
-    for state in states_list:
-        state_df = pd.DataFrame([], columns=base_columns)
-
-        # Suffix series
-        for suffix in suffix_list:
-            series_id = f"{state}{suffix}"
-            data = fred_client.get_series(series_id)
-
-            df = pd.DataFrame(data, columns=[suffix]).reset_index()
-
-            df.rename(columns={"index": "date"}, inplace=True)
-            df["date"] = pd.to_datetime(df["date"])
-            df["month"] = df["date"].dt.month
-            df["year"] = df["date"].dt.year
-            df.drop(columns=["date"], inplace=True)
-            df["state"] = state
-
-            state_df = pd.merge(state_df, df, on=base_columns, how="outer")
-
-            time.sleep(rate_limit)
-
-        # Prefix series
-        for prefix in prefix_list:
-            series_id = f"{prefix}{state}"
-            data = fred_client.get_series(series_id)
-
-            df = pd.DataFrame(data, columns=[prefix]).reset_index()
-
-            df.rename(columns={"index": "date"}, inplace=True)
-            df["date"] = pd.to_datetime(df["date"])
-            df["month"] = df["date"].dt.month
-            df["year"] = df["date"].dt.year
-            df.drop(columns=["date"], inplace=True)
-            df["state"] = state
-
-            state_df = pd.merge(state_df, df, on=base_columns, how="outer")
-
-            time.sleep(rate_limit)
-
-        all_fred_data.append(state_df)
-
-    return pd.concat(all_fred_data, ignore_index=False)
-
-def run_fred_ingestion_pipeline(fred_client: Fred, file_path: str) -> None:
-    """Run the full FRED ingestion: fetch every state's series and write the panel.
-
-    Composes get_fred_data and write_fred_data using the module-level series
-    and column configuration, producing a single CSV at the output file path.
-
-    Args:
-        fred_client: Authenticated FRED client used to fetch series.
-        file_path: Destination path for the written CSV panel.
-    """
-
-    fred_data_df = _get_fred_data(
-        fred_client=fred_client,
-        states_list=US_STATE_ABBREVS,
-        suffix_list=SERIES_SUFFIXES,
-        prefix_list=SERIES_PREFIXES,
-        base_columns=BASE_COLUMNS,
-        rate_limit=RATE_LIMIT_PAUSE_AMOUNT
-    )
-
-    write_dataframe_to_csv(df=fred_data_df, file_path=file_path)
-
-## Functions - REFACTORS
+    return states_df.join(series_names_df, how="cross")
 
 def _build_series_id(
     state: str,
     series_name: str,
     series_type: str
 ) -> str:
-    """
-    TODO: Add docstring
+    """Construct a FRED series ID by combining a state abbreviation with a series name.
+
+    Args:
+        state: Uppercase two-letter state abbreviation (e.g. "CA"). Must be
+            a member of US_STATE_ABBREVS.
+        series_name: Base FRED series code (e.g. "URN", "EXPTOT").
+        series_type: Where the state abbreviation goes relative to
+            series_name. Must be "prefix" (series_name + state) or "suffix"
+            (state + series_name).
+
+    Returns:
+        The combined FRED series ID string.
+
+    Raises:
+        AssertionError: If state is not a valid uppercase state abbreviation.
+        ValueError: If series_type is not "prefix" or "suffix".
     """
     state_assert_msg = f"state must be an uppercase state abbreviation. Received: {state}"
     assert state in US_STATE_ABBREVS, state_assert_msg
@@ -162,8 +100,18 @@ def _apply_series_id(
         row: pd.Series,
         series_by_name_dict: dict
 ) -> str:
-    """
-    TODO: Add docstring
+    """Derive the FRED series ID for a single row via _build_series_id.
+
+    Args:
+        row: A pandas Series with "state" and "series_name" fields, typically
+            one row of the empty series DataFrame produced by
+            _create_empty_series_df.
+        series_by_name_dict: Mapping of series name to series type ("prefix"
+            or "suffix"), used to look up how row["series_name"] should be
+            combined with row["state"].
+
+    Returns:
+        The FRED series ID string for the row.
     """
     return _build_series_id(
         row["state"],
@@ -171,28 +119,25 @@ def _apply_series_id(
         series_by_name_dict[row["series_name"]]
     )
     
-def _create_empty_series_df(
-    series_by_name: dict,
-    state_abbrevs: list
-) -> pd.DataFrame:
-    """
-    TODO: Add docstring
-    """
-
-    series_names = series_by_name.keys()
-    series_names_df = pd.DataFrame(series_names, columns=["series_name"])
-    states_df = pd.DataFrame(state_abbrevs, columns=["state"])
-
-    return states_df.join(series_names_df, how="cross")
-
 def _make_fred_client_request(
     series_id: str,
     fred_client: Fred
 ) -> pd.Series | None:
-    """
-    TODO: Add docstring
-    TODO: Add smarter, specific exception catching
-    TODO: Decide what to return if error: None object? empty series?
+    """Fetch a single series from the FRED API and name it after its series ID.
+
+    Args:
+        series_id: FRED series ID to request (e.g. "CAURN").
+        fred_client: Authenticated fredapi.Fred client used to make the request.
+
+    Returns:
+        The requested series as a pandas Series named series_id.
+
+    Raises:
+        Exception: Re-raises any exception encountered while fetching the
+            series from the FRED API.
+
+    TODO: Update expection handling to specific checks
+    TODO: Determine what do return if failure: None or empty series?
     """
 
     try:
@@ -209,8 +154,16 @@ def _format_series_data(
     series_name: str,
     state: str 
 ) -> pd.DataFrame:
-    """
-    TODO: Add docstring
+    """Reshape a raw FRED series into a per-state, per-month row format.
+
+    Args:
+        series: Raw FRED series data, indexed by date.
+        series_name: Column name to assign to the series' values.
+        state: State abbreviation to attach to every row.
+
+    Returns:
+        A DataFrame with columns [series_name, "month", "year", "state"],
+        one row per date in the input series.
     """
 
     series.name = series_name
@@ -229,10 +182,23 @@ def _get_fred_series(
     fred_client: Fred,
     rate_limit: float
 ) -> pd.DataFrame:
+    """Fetch and format one series row, pausing afterward to respect FRED's rate limit.
+
+    Args:
+        row: A pandas Series with "state", "series_name", and "series_id"
+            fields, typically one row of the series DataFrame.
+        fred_client: Authenticated fredapi.Fred client used to make the request.
+        rate_limit: Seconds to sleep after the request completes.
+
+    Returns:
+        The formatted series data for the row, as produced by
+        _format_series_data.
     """
-    TODO: Add docstring
-    """
-    
+    row_column_names = ["state", "series_name", "series_id"]
+    for column_name in row_column_names:
+        row_assert_msg = f"Expected {column_name} field in row series object"
+        assert column_name in row.index, row_assert_msg
+
     row_state = row["state"]
     row_series_name = row["series_name"]
     row_series_id = row["series_id"]
@@ -257,8 +223,21 @@ def _run_parallel_series_requests(
     rate_limit: float,
     progress_bar: bool = False
 ):
-    """
-    TODO: Add docstring
+    """Fetch each row's FRED series concurrently using a thread pool.
+
+    Args:
+        series_df: DataFrame of series rows to fetch, each with "state",
+            "series_name", and "series_id" columns.
+        fred_client: Authenticated fredapi.Fred client used to make requests.
+        n_max_workers: Maximum number of worker threads in the pool.
+        rate_limit: Seconds each worker sleeps after its request, passed
+            through to _get_fred_series.
+        progress_bar: Whether to display a tqdm progress bar while requests
+            are in flight. Defaults to False.
+
+    Returns:
+        series_df with a new "series_data" column holding each row's
+        formatted series DataFrame.
     """
 
     series_rows = [row for _, row in series_df.iterrows()]
@@ -280,8 +259,15 @@ def _merge_two_dfs(
         df1: pd.DataFrame,
         df2: pd.DataFrame
 ) -> pd.DataFrame:
-    """
-    TODO: Add docstring
+    """Outer-merge two series DataFrames on the shared state/year/month key.
+
+    Args:
+        df1: First DataFrame to merge.
+        df2: Second DataFrame to merge.
+
+    Returns:
+        The outer join of df1 and df2 on BASE_COLUMNS ("state", "year",
+        "month").
     """
     return pd.merge(df1, df2, on=BASE_COLUMNS, how="outer")
 
@@ -290,8 +276,23 @@ def _rollup_series_df(
     base_columns: list[str],
     series_by_name: dict
 ) -> pd.DataFrame:
-    """
-    TODO: Add docstring
+    """Collapse the long, per-series rows into one wide row per state/year/month.
+
+    For each state, merges that state's individual series DataFrames
+    together on base_columns and keeps only the base and series columns.
+
+    Args:
+        long_series_df: DataFrame with one row per (state, series_name),
+            including a "series_data" column of per-series DataFrames, as
+            produced by _run_parallel_series_requests.
+        base_columns: Key columns to merge and select on (e.g. ["state",
+            "year", "month"]).
+        series_by_name: Mapping of series name to series type; only its keys
+            are used to select the series value columns.
+
+    Returns:
+        A single DataFrame with one row per state/year/month and one column
+        per series name, concatenated across all states.
     """
     state_dfs = []
     
@@ -314,8 +315,26 @@ def run_fred_ingestion_pipeline2(
     n_max_workers: int = N_MAX_WORKERS,
     progress_bar: bool = False
 ) -> None:
-    """
-    TODO: Add docstring
+    """Fetch FRED series for every state and write the assembled panel to CSV.
+
+    Builds the (state, series_name) grid, derives each row's FRED series ID,
+    fetches the data in parallel, rolls it up into one wide row per
+    state/year/month, and writes the result to file_path.
+
+    Args:
+        series_by_name: Mapping of FRED series name to series type ("prefix"
+            or "suffix"), e.g. FRED_DATA_COLUMN_DEFINITIONS' keys.
+        states_abbrevs: State abbreviations to fetch series for.
+        base_columns: Key columns used to merge and select the final panel
+            (e.g. BASE_COLUMNS).
+        fred_client: Authenticated fredapi.Fred client used to make requests.
+        file_path: Destination path for the written CSV.
+        rate_limit: Seconds to sleep between each series request. Defaults
+            to RATE_LIMIT_PAUSE_AMOUNT.
+        n_max_workers: Maximum number of worker threads used for parallel
+            requests. Defaults to N_MAX_WORKERS.
+        progress_bar: Whether to display a tqdm progress bar while requests
+            are in flight. Defaults to False.
     """
 
     # Create empty dataframe to fill
