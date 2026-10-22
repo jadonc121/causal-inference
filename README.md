@@ -1,4 +1,4 @@
-# Estimating the Causal Impact of RGGI on State CO2 Emissions
+# Causal Inference: The Impact of Policy on Climate Change
 
 > **Status: in development.** Part 1 (data ingestion) is being built on the [`dev/data-ingestion`](https://github.com/jadonc121/causal-inference/tree/dev/data-ingestion) branch. This branch (`main`) holds the project scaffolding and will be updated when that work is merged.
 
