@@ -296,6 +296,26 @@ def _get_valid_route_ids(api_key: str, route_ids: List[str]) -> tuple:
     route_ids_terminal = [None]*len(route_ids)
     failing_route_id = None
 
+    # Make initial request here
+    initial_route_url = _build_view_url(api_key=api_key, route_ids=route_ids)
+    try:
+        initial_request = _make_url_request(url=initial_route_url)
+        initial_response = initial_request.json()["response"]
+
+        route_ids_valid = [True]*len(route_ids)
+        route_ids_terminal = [False]*(len(route_ids) - 1)
+        
+        if "routes" in initial_response.keys():
+            route_ids_terminal += [False]
+        else:
+            route_ids_terminal += [True]
+        
+        return route_ids_valid, route_ids_terminal, failing_route_id
+    except ValueError as e:
+        # Excepts case where request returned not 200: need custom exception here
+        pass
+
+    # Invalid initial request triggers validation walk
     for n_routes in range(len(route_ids)):
         route_ids_sublist = route_ids[:n_routes + 1]
         route_url = _build_view_url(api_key=api_key, route_ids=route_ids_sublist)
@@ -878,6 +898,7 @@ def get_eia_data(
     # assert route_ids is nonempty list of str
 
     # View metadata, if possible
+    # ERROR: If a valid, terminal subroutes list exists within the given route_ids, this will still return a bmr and trigger downstream calls.
     base_metadata_response = view_eia_data(
         api_key=api_key,
         route_ids=route_ids,
