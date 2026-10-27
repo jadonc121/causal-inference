@@ -63,19 +63,11 @@ def _build_view_url(
 
     return f"{eia_base_url}{route_id_substr}{view_data_substr}{view_facet_metadata_substr}{api_key_substr}"
 
+# DEPRECATE
 def _build_get_url(
     api_key: str,
     data_params: dict,
     batch_params: Optional[dict] = None,
-    # route_ids: List[str], # not optional!
-    # data_columns: List[str],
-    # facet_ids_to_filter: Optional[dict] = None, # dict of lists or make sep arg? id-value pairs
-    # freq_filter: Optional[str] = None, # str of freq type
-    # start_date_filter: Optional[str] = None,
-    # end_date_filter: Optional[str] = None,
-    # sort_by: Optional[dict] = None, # dict? col name and direction pairs (asc/desc)
-    # subset_n_rows: Optional[int] = None,
-    # offset_n_rows: Optional[int] = None,
     verbose: bool = False
 ) -> str:
     """
@@ -98,8 +90,6 @@ def _build_get_url(
     if verbose: print(f"Data columns substring: {data_cols_substr}")
 
     url = f"{eia_base_url}{route_id_substr}/data{api_key_substr}{data_cols_substr}"
-
-    # Append optional data filters
 
     # Facets
     facet_filters_substr = ""
@@ -154,7 +144,75 @@ def _build_get_url(
 
     return url
 
-def _make_url_request(url: str):
+def _build_data_request_params(
+    api_key: str, 
+    data_params: dict
+) -> dict:
+    """
+    Accepts params dicts from get_data func if validations pass
+    Passes request params to make_request
+
+    Datatypes from data_params:
+    route_ids: List[str],
+    data_columns: List[str],
+    facets: dict[facet_id: List[facet_vals]]
+    freq: str of freq format
+    start_date: format str
+    end_date: format str
+    sort_by: dict: col_name: direction
+    subset: int
+    offset: int
+
+    TODO: Integrate into other functions
+    TODO: Make sure the data_params arg has the right data types upstream: "facets"
+    TODO: Test func
+    TODO: Add docstring
+    TODO: Rename "data_params" arg to "params"
+    """
+
+    data_cols_params = {"data[]": data_params["data_columns"]}
+
+    facet_params = {}
+    if data_params["facets"]:
+        for facet_id, facet_values in data_params["facets"].items():
+            facet_params.update({f"facets[{facet_id}][]": facet_values})
+
+    freq_params = {}
+    if data_params["freq"]:
+        freq_params.update({"frequency": data_params["freq"]})
+    
+    date_range_params = {}
+    if data_params["start_date"]:
+        date_range_params.update({"start": data_params["start_date"]})
+
+    if data_params["end_date"]:
+        date_range_params.update({"end": data_params["end_date"]})
+
+    sort_by_params = {}
+    if data_params["sort_by"]:
+        for pref, (col_name, direction) in enumerate(data_params["sort_by"].items()):
+            sort_by_params.update({f"sort[{pref}][column]": col_name})
+            sort_by_params.update({f"sort[{pref}][direction]": direction})
+
+    subset_params = {}
+    if data_params["subset"]:
+        subset_params.update({"length": data_params["subset"]})
+
+    offset_params = {}
+    if data_params["offset"]:
+        offset_params.update({"offset": data_params["offset"]})
+
+    data_request_params = {"api_key": api_key}
+    data_request_params |= data_cols_params | facet_params | freq_params | date_range_params
+    data_request_params |= sort_by_params | subset_params | offset_params
+
+    return data_request_params
+
+def _make_url_request(
+    url: str,
+    params: dict = None,
+    headers: dict = None
+):
     """
     Make a request to retrieve a URL response from the given url.
 
@@ -171,7 +229,7 @@ def _make_url_request(url: str):
     TODO: Update with correct exception type
     TODO: Out of scope, but consider making this function a common.py one since it is agnostic to any pipeline.
     """
-    response = requests.get(url)
+    response = requests.get(url=url, params=params, headers=headers)
     status_code = response.status_code
 
     if status_code == 200:
@@ -703,6 +761,8 @@ def view_eia_data(
     
     return response if return_response else None
 
+# NEEDS REFACTORS FOR NEW DICT ARCH
+# rename to _validate_data_request_params
 def _validate_get_data_params(
     params: dict,
     bmr: dict
@@ -727,8 +787,8 @@ def _validate_get_data_params(
 
     # Facet IDs
     bmr_facets = bmr["base"]["facets"]["facet_id"].tolist()
-    if params["facet_ids"]:
-        for facet_id in params["facet_ids"]:
+    if params["facets"]:
+        for facet_id in list(params["facets"].keys()):
             if facet_id not in bmr_facets:
                 msg = f"Facet ID {facet_id} not found in the available facets for this response."
                 raise ValueError(msg)
@@ -781,6 +841,18 @@ def _validate_get_data_params(
         # one cannot be greater than the other (valid but does nothing)
         # if offset > total rows then will return empty result -> User won;t knwo that until a valid data query is made and row count is retrieved. Make alert later?
 
+def _build_base_url(route_ids: Optional[List[str]] = None, get_data: bool = False):
+    """
+    TODO: Add docstring
+    TODO: Decide if need to expand typehinting and error handling: only apply data substr when route_ids
+    TODO: This func can be removed later by updating the view_url func: Let that func not take api key and only create str
+    """
+    base_url = EIA_BASE_URL
+    route_id_path = "/".join(route_ids) if route_ids else ""
+    data_substr = "/data" if get_data and route_ids else ""
+
+    return f"{base_url}{route_id_path}{data_substr}"
+
 def get_eia_data(
     api_key: str,
     route_ids: List[str], # not optional!
@@ -801,6 +873,7 @@ def get_eia_data(
     TODO: Add simple asserts as needed before validation check: nonempty routes, str for filepath, etc.
     TODO: Test function and determine if a msg is needed for if "subroutes" check
     TODO: Get better exception handling for initial response
+    TODO: Remove try-else: this should be handled int he make response request func
     """
     # assert route_ids is nonempty list of str
 
@@ -819,7 +892,7 @@ def get_eia_data(
     data_params = {
         "route_ids": route_ids,
         "data_columns": data_columns,
-        "facet_ids": facet_ids_to_filter,
+        "facets": facet_ids_to_filter,
         "freq": freq_filter,
         "start_date": start_date_filter,
         "end_date": end_date_filter,
@@ -835,13 +908,10 @@ def get_eia_data(
 
     # return base_metadata_response # temp check
 
-    # Extract and store data
+    initial_request_params = _build_data_request_params(api_key=api_key, data_params=all_params)
+    base_url = _build_base_url(route_ids=data_params["route_ids"], get_data=True)
     try:
-        initial_url = _build_get_url(
-            api_key=api_key,
-            data_params=data_params
-        )
-        initial_data_request = _make_url_request(url=initial_url)
+        initial_data_request = _make_url_request(url=base_url, params=initial_request_params)
         initial_data_response = initial_data_request.json()["response"]
     except Exception as e:
         print("Something went wrong. Double check your parameter values.")
@@ -849,42 +919,43 @@ def get_eia_data(
     
     # Row count check
     n_rows = int(initial_data_response["total"])
+    if n_rows == 0:
+        print("\nWARNING: The number of rows returned was 0 for the given data params.")
 
-    if n_rows > N_MAX_ROWS_EIA_API:
+    small_subset = False
+    if batch_params["subset"] is not None and int(batch_params["subset"]) <= N_MAX_ROWS_EIA_API:
+        small_subset = True
+
+    # Batch check
+    if n_rows <= N_MAX_ROWS_EIA_API or small_subset:
+        data_df = pd.DataFrame(initial_data_response["data"])
+    else:
         data_df = _batch_data_request(
             api_key=api_key,
-            data_params=data_params,
+            data_params=data_params, 
             n_rows=n_rows,
             verbose=verbose
         )
-    else:
-        if n_rows == 0:
-            print("\nWARNING: The number of rows returned was 0 for the given data params.")
-        
-        data_df = pd.DataFrame(initial_data_response["data"])
-
+    
+    # Write or return 
     if write_to_filepath:
         write_dataframe_to_csv(df=data_df, file_path=write_to_filepath)
     else:
         return data_df
 
-# Is this needed? 
 def _retrieve_data(
     api_key: str,
-    data_params: dict,
-    batch_params: dict, # Needed when not init request
-    verbose: bool = False
+    params: dict,
 ) -> pd.DataFrame:
     """
-    
+    TODO: Add docstring
+    TODO: Generalize to be a "retrieve_response" func that does not return a pd df
     """
 
-    data_url = _build_get_url(
-        api_key=api_key,
-        data_params=data_params,
-        batch_params=batch_params
-    )
-    data_request = _make_url_request(url=data_url)
+    base_url = _build_base_url(route_ids=params["route_ids"], get_data=True)
+    request_params = _build_data_request_params(api_key=api_key, data_params=params)
+
+    data_request = _make_url_request(url=base_url, params=request_params)
     data_response = data_request.json()["response"]
         # no checks needed since already validated
         # make url-level checks for response code and size of data
@@ -898,9 +969,10 @@ def _batch_data_request(
     verbose: bool = False
 ) -> pd.DataFrame:
     """
-
+    TODO: Add docstring
+    TODO: Update to receive a response object and convert to pd df here
     """
-    if verbose: print("Batching data request...\n")
+    if verbose: print(f"Batching data request for {n_rows} total rows...\n")
 
     batched_data_dfs = []
 
@@ -915,10 +987,10 @@ def _batch_data_request(
             "offset": n_max_rows * batch_num
         }
 
+        all_params = data_params | batch_params
         batch_data_df = _retrieve_data(
             api_key=api_key,
-            data_params=data_params,
-            batch_params=batch_params
+            params=all_params
         )
         batched_data_dfs.append(batch_data_df)
 
