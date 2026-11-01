@@ -63,87 +63,6 @@ def _build_view_url(
 
     return f"{eia_base_url}{route_id_substr}{view_data_substr}{view_facet_metadata_substr}{api_key_substr}"
 
-# DEPRECATE
-def _build_get_url(
-    api_key: str,
-    data_params: dict,
-    batch_params: Optional[dict] = None,
-    verbose: bool = False
-) -> str:
-    """
-    TODO: Convert to accept only 4 things: apikey, data params, batch params, verbose
-    TODO: if batch params None, make them empty/defaults
-    """
-    eia_base_url = EIA_BASE_URL
-
-    # Add explanation header for if verbose and better formatting
-    # if verbose: print("Verbosity message here.")
-
-    route_id_substr = "/".join(data_params["route_ids"])
-    if verbose: print(f"Route ID substring: {route_id_substr}")
-
-    api_key_substr = f"?api_key={api_key}"
-
-    data_cols_substr = ""
-    for col_name in data_params["data_columns"]:
-        data_cols_substr += f"&data[]={col_name}"
-    if verbose: print(f"Data columns substring: {data_cols_substr}")
-
-    url = f"{eia_base_url}{route_id_substr}/data{api_key_substr}{data_cols_substr}"
-
-    # Facets
-    facet_filters_substr = ""
-    if data_params["facet_ids"]:
-        for id, value in data_params["facet_ids"].items():
-            facet_filters_substr += f"&facets[{id}][]={value}"
-    if verbose: print(f"Facet filters subtring: {facet_filters_substr}")
-
-    # Frequency
-    freq_substr = ""
-    if data_params["freq"]:
-        freq_substr = f"&frequency={data_params["freq"]}"
-    if verbose: print(f"Frequency substring: {freq_substr}")
-    
-    # Dates
-    start_date_substr = ""
-    if data_params["start_date"]:
-        start_date_substr = f"&start={data_params["start_date"]}"
-
-    end_date_substr = ""
-    if data_params["end_date"]:
-        end_date_substr = f"&end={data_params["end_date"]}"
-
-    date_range_substr = f"{start_date_substr}{end_date_substr}"
-    if verbose: print(f"Date Range substring: {date_range_substr}")
-
-    # Sort
-    sort_substr = ""
-    if data_params["sort_by"]:
-        for pref, (col_name, dir) in enumerate(data_params["sort_by"].items()):
-            sort_col_name_substr = f"&sort[{pref}][column]={col_name}"
-            sort_dir_substr = f"&sort[{pref}][direction]={dir}"
-            sort_substr += f"{sort_col_name_substr}{sort_dir_substr}"
-    if verbose: print(f"Sort substring: {sort_substr}")
-
-    # Optional batch params
-    subset_substr = ""
-    offset_substr = ""
-    
-    if batch_params:
-        if batch_params["subset"]:
-            subset_substr = f"&length={batch_params["subset"]}"
-            if verbose: print(f"Subset substring: {subset_substr}")
-
-        if batch_params["offset"]:
-            offset_substr = f"&offset={batch_params["offset"]}"
-            if verbose: print(f"Offset substring: {offset_substr}")
-
-    # Build get data URL
-    url += f"{facet_filters_substr}{freq_substr}{date_range_substr}"
-    url += f"{sort_substr}{subset_substr}{offset_substr}"
-
-    return url
-
 def _build_data_request_params(
     api_key: str, 
     data_params: dict
@@ -163,7 +82,6 @@ def _build_data_request_params(
     subset: int
     offset: int
 
-    TODO: Integrate into other functions
     TODO: Make sure the data_params arg has the right data types upstream: "facets"
     TODO: Test func
     TODO: Add docstring
@@ -636,6 +554,7 @@ def _display_metadata(metadata: dict) -> None:
         subfacet_metadata = facet_metadata["subfacets"]
         empty_facets = facet_metadata["empty_facets"]
 
+        # TODO: Make this an if-else block?
         if empty_facets:
             print("Displaying subfacet metadata for all available facet IDs.")
 
@@ -679,7 +598,7 @@ def _extract_response(
         ValueError: If more than one terminal ID is found (rare).
         ValueError: If an edge case is found in the possible combinations of Boolean logic in the args.
 
-    TODO: Decide if using np.all() is better in if statements
+    TODO: Decide if using np.all() and np.any() is better in if statements
     """
     incorrect_arg_length_assert_msg = f"All route arguments must be of the same length."
     assert len(user_route_ids) == len(route_ids_valid), incorrect_arg_length_assert_msg
@@ -752,6 +671,8 @@ def view_eia_data(
     Raises:
         ValueError: If the given API key is invalid.
 
+    TODO: Update docstring
+    TODO: Conform func halts where I want it to: test for all edge cases
     TODO: Need to determine what to do if user wants to see the full subfacet metadata for any given set of facets (useful for filtering). When to print samples and when to print full set? Sep func for subfacet viewing?
     """
     _check_valid_api_key(api_key=api_key)
@@ -772,28 +693,27 @@ def view_eia_data(
         facet_ids_to_view=facet_ids_to_view
     )
 
-    if "subroutes" in response.keys():
-        # Invalid or non-terminal route path
+    if "subroutes" in response.keys(): # Invalid or non-terminal route path
         display(response["subroutes"])
 
     else:
         _display_metadata(metadata=response)
     
-    return response if return_response else None
+    all_valid_routes = np.all(route_ids_valid)
+    return (response, all_valid_routes) if return_response else None
 
-# NEEDS REFACTORS FOR NEW DICT ARCH
-# rename to _validate_data_request_params
-def _validate_get_data_params(
+def _validate_data_request_params(
     params: dict,
     bmr: dict
 ) -> None:
     """
-    
+    TODO: Add docstring - make sure to explain/justify the differnece int he facet IDs lists in the validation
+    TODO: Determine if/how to add regex validations for frequency formatting
+    TODO: Determine if/hoe to add regex validations for date range string
+    TODO: Determine if an alert for out of range date range is needed
+    TODO: Determine if an alert is needed when subset and offset have edge cases
+    TODO: Determine if a verbosity level would be useful here (e.g., if offset > total rows, offset > subset)
     """
-    # Check for valid datatypes
-
-    # route_ids must be nonempty - check in this func?
-
     # Data columns
     if len(params["data_columns"]) < 1:
         msg = f"There must be at least one data column to select from."
@@ -802,64 +722,63 @@ def _validate_get_data_params(
     bmr_cols = bmr["base"]["data"]["data_id"].tolist()
     for col in params["data_columns"]:
         if col not in bmr_cols:
-            msg = f"Data columns {col} was not found in the available data columns for this response."
-            raise ValueError(msg)
+            col_msg = f"Data columns {col} was not found in the available data columns for this response."
+            raise ValueError(col_msg)
 
-    # Facet IDs
-    bmr_facets = bmr["base"]["facets"]["facet_id"].tolist()
+    # Facet IDs and Values
+    bmr_facets = bmr["base"]["facets"]["facet_id"].tolist() # total possible facets
     if params["facets"]:
-        for facet_id in list(params["facets"].keys()):
-            if facet_id not in bmr_facets:
-                msg = f"Facet ID {facet_id} not found in the available facets for this response."
-                raise ValueError(msg)
-    # Will need to call teh view facet metadata logic to get valid facet value if wanted
-        # else, the query will silently fail or return an empty data response
-    # facet values must be in facet ID dict
+        bmr_subfacets = {}
+        for facet_id, facet_values in bmr["facets"]["subfacets"].items(): # user's requested and valid facets
+            bmr_subfacets.update({facet_id: facet_values["subfacet_id"].tolist()})
+
+        for user_facet_id, user_facet_values in params["facets"].items():
+            if user_facet_id not in bmr_facets:
+                facet_id_msg = f"Facet ID {user_facet_id} was not found in the available facets for this response."
+                raise ValueError(facet_id_msg)
+
+            for value in user_facet_values:
+                if value not in bmr_subfacets[user_facet_id]:
+                    facet_val_msg = f"Facet value {value} was not found in the available values for facet ID {user_facet_id}."
+                    raise ValueError(facet_val_msg)
 
     # Frequency
-    bmr_freq_ids = bmr["base"]["frequency"]["frequency_id"].tolist()
-    # Write conditions for if this does not exist -> empty/defaults
     if params["freq"]:
+        bmr_freq_ids = bmr["base"]["frequency"]["frequency_id"].tolist()
         if params["freq"] not in bmr_freq_ids:
             msg = f'Frequency "{params["freq"]}" was not found in the available frequencies for this response.'
             raise ValueError(msg)
 
-    # freq format must match given format - use regex?
-
-    # Date Ranges - these checks needed? Maybe check the formatting over the range
-    # start/end dates mus tbe in range: out of bounds may still be valid just alert user
-
     # Sorting
-    # Write conditions for if this does not exist -> empty/defaults
     if params["sort_by"]:
         for col, dir in params["sort_by"].items():
             if col not in bmr_cols + bmr_facets:
-                msg = f"Column {col} not found in teh available columns for this response."
-                raise ValueError(msg)
+                sort_col_msg = f"Column {col} not found in the available columns for this response."
+                raise ValueError(sort_col_msg)
             
             if dir not in ["asc", "desc"]:
-                msg = f"The sorint direction for column {col} must be either 'asc' or 'desc'. Received: {dir}."
-                raise ValueError(msg)
+                dir_msg = f"The sorting direction for column {col} must be either 'asc' or 'desc'. Received: {dir}."
+                raise ValueError(dir_msg)
 
-    # Subset and Offset
-    for num, name in zip([params["subset"], params["offset"]], ["subset", "offset"]):
-        # ERROR: I need to allow for None values of these two: returns blank/default
-            # If None, return blank/default
-            # If not None, make checks for convert to int
-            # Write conditions for if this does not exist -> empty/defaults
-        if num:
-            try: 
-                num_int = int(num)
-            except ValueError as e:
-                msg = f"{name} must be a nonnegative int: {e}"
-                raise ValueError(msg)
-            
-            if num_int < 0:
-                msg = f"{name} must be a nonnegative int."
-                raise ValueError(msg)
-            
-        # one cannot be greater than the other (valid but does nothing)
-        # if offset > total rows then will return empty result -> User won;t knwo that until a valid data query is made and row count is retrieved. Make alert later?
+    # Subset
+    if params["subset"]:
+        subset_msg = f"Subset must be a nonnetgative int."
+        try:
+            subset_int = int(params["subset"])
+            if subset_int < 0:
+                raise ValueError
+        except ValueError as e:
+            raise ValueError(f"{subset_msg}: {e}")
+        
+    # Offset
+    if params["offset"]:
+        offset_msg = f"Offset must be a nonnetgative int."
+        try:
+            offset_int = int(params["offset"])
+            if offset_int < 0:
+                raise ValueError
+        except ValueError as e:
+            raise ValueError(f"{offset_msg}: {e}")
 
 def _build_base_url(route_ids: Optional[List[str]] = None, get_data: bool = False):
     """
@@ -868,10 +787,10 @@ def _build_base_url(route_ids: Optional[List[str]] = None, get_data: bool = Fals
     TODO: This func can be removed later by updating the view_url func: Let that func not take api key and only create str
     """
     base_url = EIA_BASE_URL
-    route_id_path = "/".join(route_ids) if route_ids else ""
+    full_route_id = "/".join(route_ids) if route_ids else ""
     data_substr = "/data" if get_data and route_ids else ""
 
-    return f"{base_url}{route_id_path}{data_substr}"
+    return f"{base_url}{full_route_id}{data_substr}"
 
 def get_eia_data(
     api_key: str,
@@ -888,25 +807,37 @@ def get_eia_data(
     verbose: bool = False
 ) -> pd.DataFrame | None:
     """
+    TODO: Add docstring
+    TODO: Add a param for viewing the data: if F, onyl return data or raise errors, no view.
     TODO: Rethink verbose param and if it'd be better to make it a verbosity level instead (All True print every url build)
     TODO: Determine the best return for n_rows < MAX: initial response is okay or call _retrieve?
-    TODO: Add simple asserts as needed before validation check: nonempty routes, str for filepath, etc.
-    TODO: Test function and determine if a msg is needed for if "subroutes" check
-    TODO: Get better exception handling for initial response
+    TODO: Determine if assert on route_ids is necessary: empty list default to view func's alerting behavior, good?
+    TODO: Test function and determine if a msg is needed for valid response check
+    TODO: Determine if the "subroutes in bmr" check is needed: wouldn't it fail upstream anyway if nonterminal?
+    TODO: Build better exception handling for initial response
     TODO: Remove try-else: this should be handled int he make response request func
+    TODO: Decide if return data_df no matter what or keep as is
     """
-    # assert route_ids is nonempty list of str
+    # Asserts
+    # assert route_ids is not None and route_ids != [], "route_ids cannot be empty or None"
+    if write_to_filepath:
+        assert isinstance(write_to_filepath, str), f"write_to_filepath must be a str"
+
+    get_subfacet_metadata = facet_ids_to_filter is not None and facet_ids_to_filter != []
 
     # View metadata, if possible
-    # ERROR: If a valid, terminal subroutes list exists within the given route_ids, this will still return a bmr and trigger downstream calls.
-    base_metadata_response = view_eia_data(
+    if verbose: print("Beginning view data response.")
+    base_metadata_response, all_valid_routes = view_eia_data(
         api_key=api_key,
         route_ids=route_ids,
+        get_subfacet_metadata=get_subfacet_metadata,
+        facet_ids_to_view=facet_ids_to_filter,
         return_response=True
     )
+    if verbose: print("Completed view data response.")
 
-    # Halt here if the above is invalid or nonterminal
-    if "subroutes" in base_metadata_response.keys():
+    # Halt here if the above is invalid
+    if "subroutes" in base_metadata_response.keys() or not all_valid_routes:
         # Print msg?
         return 
 
@@ -925,10 +856,13 @@ def get_eia_data(
     }
 
     all_params = data_params | batch_params
-    _validate_get_data_params(params=all_params, bmr=base_metadata_response)
+    if verbose: print("Beginning validation of data request params.")
+    _validate_data_request_params(params=all_params, bmr=base_metadata_response)
+    if verbose: print("Completed validation.")
 
     # return base_metadata_response # temp check
 
+    if verbose: print("Beginning initial data request.")
     initial_request_params = _build_data_request_params(api_key=api_key, data_params=all_params)
     base_url = _build_base_url(route_ids=data_params["route_ids"], get_data=True)
     try:
@@ -938,6 +872,7 @@ def get_eia_data(
         print("Something went wrong. Double check your parameter values.")
         raise e
     
+    if verbose: print("Completed initial request. Running row and batch checks.")
     # Row count check
     n_rows = int(initial_data_response["total"])
     if n_rows == 0:
@@ -949,8 +884,10 @@ def get_eia_data(
 
     # Batch check
     if n_rows <= N_MAX_ROWS_EIA_API or small_subset:
+        if verbose: print("No batching needed.")
         data_df = pd.DataFrame(initial_data_response["data"])
     else:
+        if verbose: print("Batching needed.")
         data_df = _batch_data_request(
             api_key=api_key,
             data_params=data_params, 
@@ -959,6 +896,7 @@ def get_eia_data(
         )
     
     # Write or return 
+    if verbose: print("Writing/Returning data")
     if write_to_filepath:
         write_dataframe_to_csv(df=data_df, file_path=write_to_filepath)
     else:
@@ -971,6 +909,7 @@ def _retrieve_data(
     """
     TODO: Add docstring
     TODO: Generalize to be a "retrieve_response" func that does not return a pd df
+    TODO: Determine if checks/alerts needed for size of data
     """
 
     base_url = _build_base_url(route_ids=params["route_ids"], get_data=True)
@@ -978,8 +917,6 @@ def _retrieve_data(
 
     data_request = _make_url_request(url=base_url, params=request_params)
     data_response = data_request.json()["response"]
-        # no checks needed since already validated
-        # make url-level checks for response code and size of data
 
     return pd.DataFrame(data_response["data"])
 
