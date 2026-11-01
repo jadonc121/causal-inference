@@ -438,7 +438,7 @@ def _extract_metadata(
     full_route_id = "/".join(route_ids)
 
     general_df = pd.DataFrame(
-        [bmr["id"], full_route_id, route_lineage, n_rows, bmr["name"], route_desc],
+        [route_ids[-1], full_route_id, route_lineage, n_rows, bmr.get("name", route_ids[-1]), route_desc],
         index=["Route ID", "Full Route ID", "Route Lineage",  "Row Count", "Route Name", "Description"],
         columns=[""]
     )
